@@ -68,13 +68,19 @@ WHERE f.date_key IS NOT NULL AND d.date_key IS NULL;
 -- Expected: distinct_in_source should equal rows_in_dim for each dimension
 -- If dim has FEWER rows than source distinct values, some values never
 -- made it into the dimension table (like our earlier dim_date issue)
+--
+-- NOTE: "Date" is TEXT in the source, so TO_CHAR needs a ::DATE cast.
+-- Payment_Method is COALESCEd to the 'N/A - Trip Not Completed' placeholder
+-- (same value used when populating dim_payment_method) so a NULL source
+-- value counts as one distinct bucket on both sides — COUNT(DISTINCT)
+-- otherwise silently ignores NULLs and the counts would never match.
 -- =====================================================================
 SELECT 
     (SELECT COUNT(DISTINCT "Vehicle_Type") FROM booking) AS distinct_vehicle_source,
     (SELECT COUNT(*) FROM dim_vehicle_type) AS rows_in_dim_vehicle,
-    (SELECT COUNT(DISTINCT "Payment_Method") FROM booking) AS distinct_payment_source,
+    (SELECT COUNT(DISTINCT COALESCE("Payment_Method", 'N/A - Trip Not Completed')) FROM booking) AS distinct_payment_source,
     (SELECT COUNT(*) FROM dim_payment_method) AS rows_in_dim_payment,
-    (SELECT COUNT(DISTINCT TO_CHAR("Date",'YYYYMMDD')) FROM booking) AS distinct_date_source,
+    (SELECT COUNT(DISTINCT TO_CHAR("Date"::DATE,'YYYYMMDD')) FROM booking) AS distinct_date_source,
     (SELECT COUNT(*) FROM dim_date) AS rows_in_dim_date;
 
 

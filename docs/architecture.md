@@ -97,14 +97,15 @@ An alternative design would bundle these three low-cardinality flags into a sing
 
 ### 3.5 No slowly changing dimension (SCD) handling
 
-Every dimension table is populated with a plain "insert if not already present" pattern:
+Every dimension table is populated with an "insert if not already present" pattern:
 
 ```sql
 INSERT INTO dim_vehicle_type (vehicle_type)
-SELECT DISTINCT "Vehicle_Type" FROM booking WHERE "Vehicle_Type" IS NOT NULL;
+SELECT DISTINCT "Vehicle_Type" FROM booking WHERE "Vehicle_Type" IS NOT NULL
+ON CONFLICT (vehicle_type) DO NOTHING;
 ```
 
-(relying on the `UNIQUE` constraint on the business column to silently reject re-inserts of values that already exist — except `dim_date`, which explicitly uses `ON CONFLICT (date_key) DO NOTHING`).
+Every dimension insert uses `ON CONFLICT (...) DO NOTHING` against its unique business column. This is a necessary, explicit clause, not a side effect of the `UNIQUE` constraint — a plain `INSERT` into a `UNIQUE NOT NULL` column **errors out** on a duplicate value, it doesn't silently skip it. (An earlier version of `09_pop_dims.sql` only had this clause on the `dim_date` insert; the other five would abort with a duplicate-key error on the second run. That's fixed now — see §6.)
 
 This is effectively **SCD Type 0** (dimension values never change once inserted) or, generously, **Type 1** (no history kept at all). There's no `valid_from`/`valid_to`, no versioning, no tracking of "this location was renamed" or "this cancellation reason's category changed." For this dataset that's a fine choice — vehicle types, payment methods, and location names aren't expected to change meaning over time — but it's worth naming explicitly, because if a dimension's *meaning* ever needs to change while preserving historical accuracy (e.g. reclassifying which `reason_type` a cancellation reason belongs to), this design will overwrite forward rather than preserve the old association.
 
@@ -151,20 +152,14 @@ The `model/` folder's numeric prefixes encode a hard dependency order, driven di
 3. **`09_pop_dims.sql`**: dimensions must be *populated* before the fact table can be populated, because...
 4. **`10_pop_fact.sql`**: ...every row here does a `LEFT JOIN` against each dimension to translate raw text (`"Vehicle_Type"`) into a surrogate key (`vehicle_type_key`). If a dimension were empty, every one of these lookups would return `NULL` — which is exactly what `data_quality_test.sql` Test 3 (unexpected NULLs) and Test 5 (dimension completeness) are designed to catch.
 
-## 6. A gap worth knowing about: fact-load idempotency
+## 6. Idempotency across the full pipeline
 
-The raw layer (`incremental.py`) is explicitly designed to be safely re-run — it upserts with `ON CONFLICT (Booking_ID) DO NOTHING`.
+The raw layer (`incremental.py`) was designed from the start to be safely re-run — it upserts with `ON CONFLICT (Booking_ID) DO NOTHING`. The modeled layer (`09_pop_dims.sql`, `10_pop_fact.sql`) has since been brought in line with that same guarantee:
 
-**`10_pop_fact.sql` does not have the same protection.** It's a plain `INSERT INTO fact_bookings (...) SELECT ... FROM booking b ...` with no `ON CONFLICT` clause. Since `booking_id` is the fact table's primary key:
+- **`09_pop_dims.sql`**: every dimension insert uses `ON CONFLICT (...) DO NOTHING` against its unique business column, so re-running it after new bookings arrive only adds genuinely new dimension values (new vehicle types, new locations, new dates, etc.) instead of erroring on a duplicate.
+- **`10_pop_fact.sql`**: adds a `WHERE NOT EXISTS (SELECT 1 FROM fact_bookings fb WHERE fb.booking_id = b."Booking_ID")` filter — so it only processes bookings that aren't already in the fact table, rather than re-scanning and re-joining the entire raw table every run — plus `ON CONFLICT (booking_id) DO NOTHING` as a safety net in case of a race between two concurrent loads.
 
-- Running `10_pop_fact.sql` a second time against the *same* raw data will fail outright with a primary key violation.
-- Running it after `incremental.py` has added *new* rows to the raw table will also fail, because it re-selects **every** row in `booking`, including ones already in `fact_bookings` — not just the new ones.
-
-If the intent is to re-run the whole pipeline incrementally (matching how the raw layer already works), `10_pop_fact.sql` would need either:
-```sql
-... ON CONFLICT (booking_id) DO NOTHING;
-```
-or a `WHERE b."Booking_ID" NOT IN (SELECT booking_id FROM fact_bookings)` filter before the join. Right now, the fact/dimension layer is really a **full rebuild** script, not an incremental one — worth keeping in mind before wiring it into a recurring job.
+With all three layers idempotent, the full chain — `incremental.py` → `09_pop_dims.sql` → `10_pop_fact.sql` — can be run repeatedly, or on a schedule, without manual cleanup between runs. This is what makes it safe to wire into an orchestrator (cron, Airflow, Dagster, etc.) rather than something that has to be run by hand and reset each time.
 
 ## 7. Referential integrity strategy
 
