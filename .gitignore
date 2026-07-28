@@ -1,12 +1,66 @@
-# Python-generated files
+# =========================
+# Environment
+# =========================
+.env
+.env.*
+.venv/
+venv/
+env/
+
+# =========================
+# Python
+# =========================
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Ignore all __init__.py files (NOT RECOMMENDED)
+**/__init__.py
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary Files
+# =========================
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# =========================
+# Database
+# =========================
+*.db
+*.sqlite3
+
+# =========================
+# Build / Distribution
+# =========================
 build/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-.env
-__init__.py
