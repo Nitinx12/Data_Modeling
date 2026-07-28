@@ -1,0 +1,74 @@
+# =====================================================================
+# docker-compose.yml
+#
+# Brings up Postgres + the ETL pipeline together, so you don't need a
+# host-installed Postgres at all.
+#
+# Reuses values from your existing .env file automatically — Compose
+# loads any file named ".env" in this same folder and substitutes
+# ${VARIABLE} references below with values from it. No values are
+# duplicated by hand; PGHOST is the one exception (see comment below).
+#
+# Usage:
+#   docker compose up --build        # build the pipeline image, start both, run once
+#   docker compose up --build db     # just start Postgres, e.g. to inspect data
+#   docker compose run --rm pipeline # re-run the pipeline on demand
+#   docker compose down              # stop everything (data persists in the volume)
+#   docker compose down -v           # stop everything AND wipe the Postgres data
+# =====================================================================
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      # NOTE: the official postgres image expects POSTGRES_USER / POSTGRES_DB,
+      # not POSTGRES_USERNAME / POSTGRES_DATABASE — mapped here from your
+      # existing .env names so you don't need a second, duplicate set of vars.
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+    ports:
+      # host:container — lets you still connect with a local psql/DBeaver/etc.
+      # at localhost:5432 if you want to poke around outside the pipeline.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d ${POSTGRES_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # PGHOST is intentionally hardcoded to "db" (the service name above),
+      # NOT ${POSTGRES_HOST} from .env — inside Compose's network, containers
+      # reach each other by service name, and your .env's "localhost" would
+      # point the pipeline container at itself instead of the db container.
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DATABASE}
+      PGUSER: ${POSTGRES_USERNAME}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      # Overridden to the in-container mount path below — your .env's
+      # Windows path (C:\Users\...) doesn't exist inside the container.
+      CSV_FILE_PATH: /data/Bookings.csv
+      TABLE_NAME: ${TABLE_NAME}
+      CHUNK_SIZE: ${CHUNK_SIZE}
+    volumes:
+      # Left side: change this to wherever Bookings.csv actually lives on
+      # your machine. Right side must match CSV_FILE_PATH above.
+      - C:\Users\91852\OneDrive\Desktop\Github Repo\Booking_data\datasets\data\Bookings.csv:/data/Bookings.csv:ro
+      # Mirrors the container's logs back out to the host, so pipeline_*.log
+      # files land in C:\UBER\logs same as they do running natively.
+      - ./logs:/app/logs
+
+volumes:
+  pgdata:

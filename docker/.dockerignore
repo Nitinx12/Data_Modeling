@@ -1,0 +1,14 @@
+# Don't bake secrets into the image — pass them at runtime instead
+.env
+_env
+
+# Local artifacts that don't belong in the image
+.venv/
+__pycache__/
+*.pyc
+logs/
+notebooks/
+.git/
+.gitignore
+README.md
+docs/
