@@ -9,9 +9,12 @@ FROM python:3.13-slim AS base
 # postgresql-client gives us `psql`, which model/09_pop_dims.sql and
 # model/10_pop_fact.sql are run through (same as pipeline.ps1 does on
 # Windows). build-essential covers any package in uv.lock that needs to
-# compile from source (e.g. psycopg2 without the -binary wheel).
+# compile from source. libpq-dev provides pg_config + headers, which
+# psycopg2 (the plain, non -binary package) needs to compile against —
+# without it, `uv sync` fails with "pg_config executable not found."
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
+    libpq-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 

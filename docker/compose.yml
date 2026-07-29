@@ -63,6 +63,16 @@ services:
       PGDATABASE: ${POSTGRES_DATABASE}
       PGUSER: ${POSTGRES_USERNAME}
       PGPASSWORD: ${POSTGRES_PASSWORD}
+      # utils/db.py (used by incremental.py and data_quality_checks.py)
+      # reads POSTGRES_* names via SQLAlchemy, not the PG* names above —
+      # psql and psycopg2-via-SQLAlchemy don't share an env var convention,
+      # so both sets need to be set to the same values. Same "db" reasoning
+      # as PGHOST: service-name networking, not .env's "localhost".
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       # Overridden to the in-container mount path below — your .env's
       # Windows path (C:\Users\...) doesn't exist inside the container.
       CSV_FILE_PATH: /data/Bookings.csv
