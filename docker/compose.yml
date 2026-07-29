@@ -1,15 +1,21 @@
 # =====================================================================
-# docker-compose.yml
+# docker/compose.yml
 #
 # Brings up Postgres + the ETL pipeline together, so you don't need a
 # host-installed Postgres at all.
 #
 # Reuses values from your existing .env file automatically — Compose
-# loads any file named ".env" in this same folder and substitutes
+# loads any file named ".env" next to this compose.yml and substitutes
 # ${VARIABLE} references below with values from it. No values are
 # duplicated by hand; PGHOST is the one exception (see comment below).
 #
-# Usage:
+# NOTE ON PATHS: this file lives in docker/, but `build.context: ..`
+# points the build at the project root (UBER/), which is where
+# pyproject.toml, uv.lock, model/, scripts/, utils/, etc. actually live.
+# The Dockerfile path is given relative to this context, so it's
+# docker/Dockerfile, not just Dockerfile.
+#
+# Usage (run from inside docker/, or add -f docker/compose.yml from root):
 #   docker compose up --build        # build the pipeline image, start both, run once
 #   docker compose up --build db     # just start Postgres, e.g. to inspect data
 #   docker compose run --rm pipeline # re-run the pipeline on demand
@@ -42,8 +48,8 @@ services:
 
   pipeline:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     depends_on:
       db:
         condition: service_healthy
@@ -63,11 +69,18 @@ services:
       TABLE_NAME: ${TABLE_NAME}
       CHUNK_SIZE: ${CHUNK_SIZE}
     volumes:
-      # Left side: change this to wherever Bookings.csv actually lives on
-      # your machine. Right side must match CSV_FILE_PATH above.
-      - C:\Users\91852\OneDrive\Desktop\Github Repo\Booking_data\datasets\data\Bookings.csv:/data/Bookings.csv:ro
+      # Left side: set CSV_HOST_PATH in your .env to wherever Bookings.csv
+      # actually lives on your machine, e.g.
+      #   CSV_HOST_PATH=./data/Bookings.csv
+      # or an absolute path using forward slashes, e.g.
+      #   CSV_HOST_PATH=C:/Users/91852/OneDrive/Desktop/Github Repo/Booking_data/datasets/data/Bookings.csv
+      # Using an env var (and forward slashes) avoids Compose misparsing a
+      # raw "C:\...\..." value, since backslashes and the drive-letter colon
+      # collide with the host:container:mode volume syntax.
+      - ${CSV_HOST_PATH}:/data/Bookings.csv:ro
       # Mirrors the container's logs back out to the host, so pipeline_*.log
-      # files land in C:\UBER\logs same as they do running natively.
+      # files land in docker/logs on the host, same as C:\UBER\logs does
+      # running natively.
       - ./logs:/app/logs
 
 volumes:
