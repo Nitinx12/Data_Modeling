@@ -1,6 +1,25 @@
 # UBER Bookings Analytics Pipeline
 
-A Postgres-based ELT pipeline that takes a raw ride-bookings CSV, loads it idempotently into a landing table, and transforms it into a Kimball-style **star schema** for analytics. The project's center of gravity is the data model itself — everything else (Docker, the incremental loader, the quality tests) exists to get data into that model safely and keep it trustworthy.
+**A production-style Postgres ELT pipeline that turns a raw ride-bookings CSV into a Kimball-style star schema — built for correctness, idempotency, and analytical speed.**
+
+![Postgres](https://img.shields.io/badge/Postgres-16-336791?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-informational)
+
+The project's center of gravity is the data model itself — everything else (Docker orchestration, the incremental loader, the quality-test suite) exists to get data into that model safely and keep it trustworthy.
+
+---
+
+## Why This Project
+
+- **Dimensional modeling done deliberately.** Every design choice — surrogate vs. smart keys, role-playing dimensions, degenerate dimensions, SCD strategy — is documented with the tradeoff it accepts, not just the outcome.
+- **Idempotent by construction.** The loader, dimension population, and fact population can all be re-run safely at any point in the pipeline without producing duplicates or corrupting state.
+- **Reproducible anywhere.** `docker compose up` guarantees the same Postgres version, same Python environment, and same run sequence on any machine — no local setup required beyond Docker.
+- **Quality-gated.** Ten documented SQL checks validate completeness, uniqueness, referential integrity, value sanity, and business logic before the data is considered analytics-ready.
+- **Honest documentation.** Known inconsistencies between docs and code are tracked explicitly (Section 7) rather than hidden.
+
+---
 
 ## At a Glance
 
@@ -56,9 +75,9 @@ Because the star schema is rebuilt from the untouched raw table (`09_pop_dims.sq
 
 ---
 
-## 2. Data Modeling — the core of this project
+## 2. Data Modeling — the Core of This Project
 
-### 2.1 Why a star schema, not 3NF
+### 2.1 Why a Star Schema, Not 3NF
 
 | | 3NF (normalized) | Star schema (this project) |
 |---|---|---|
@@ -66,7 +85,7 @@ Because the star schema is rebuilt from the untouched raw table (`09_pop_dims.sq
 | Joins for a typical report | Many, often nested | One hop from fact to each dimension |
 | Fits the actual query pattern | No — this isn't a transactional system | Yes — "revenue by vehicle type, by day, by payment method" is exactly what a star schema is built for |
 
-### 2.2 The four-step Kimball process, as applied here
+### 2.2 The Four-Step Kimball Process, as Applied Here
 
 | Step | Decision |
 |---|---|
@@ -77,7 +96,7 @@ Because the star schema is rebuilt from the untouched raw table (`09_pop_dims.sq
 
 The order matters: dimensions and facts are only defined once the grain is locked. Had the grain been "one row per status-change event" instead of "one row per booking," almost every dimension and fact below would change.
 
-### 2.3 Entity-relationship diagram
+### 2.3 Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
@@ -154,7 +173,7 @@ erDiagram
 
 All eight foreign keys use `ON UPDATE NO ACTION / ON DELETE NO ACTION` — Postgres blocks deleting or renaming a dimension row that's still referenced by a fact row.
 
-### 2.4 Key design decisions and their tradeoffs
+### 2.4 Key Design Decisions and Their Tradeoffs
 
 | Decision | What was done | Why | Tradeoff accepted |
 |---|---|---|---|
@@ -164,7 +183,7 @@ All eight foreign keys use `ON UPDATE NO ACTION / ON DELETE NO ACTION` — Postg
 | Flags instead of a junk dimension | `canceled_by_customer_flag`, `canceled_by_driver_flag`, `incomplete_rides_flag` are plain booleans on the fact table | Three booleans don't meaningfully widen the fact table, and inline filtering is simpler than joining out | Worth revisiting if many more categorical flags get added later |
 | No SCD handling | Every dimension insert is "insert if not already present" via `ON CONFLICT (...) DO NOTHING` | Vehicle types, payment methods, and location names aren't expected to change meaning over time | Effectively SCD Type 0/1 — no history. If a dimension's meaning ever needs to change while preserving historical accuracy, this design overwrites forward rather than preserving the old association |
 
-### 2.5 Measure additivity
+### 2.5 Measure Additivity
 
 Not every numeric column on `fact_bookings` can be summed meaningfully — this governs how `sql/01-10.sql` is written:
 
@@ -335,10 +354,10 @@ UBER
 
 Flagging these rather than silently picking one, since the underlying docs disagree:
 
-- **Raw table naming**: `data_quality.md`'s test queries reference a table called `booking` (singular), while `incremental.md`, `model.md`, and `docker.md` all consistently use `bookings` (plural). Confirm the actual table name before running the SQL tests as written, or Tests 1 and 5 will fail with "relation does not exist."
-- **Quality-check count mismatch**: `docker.md` describes `scripts/data_quality_checks.py` (run inside the container) as performing 8 checks, while `data_quality.md` documents 10 SQL tests in `tests/data_quality_test.sql`. These read as two separate implementations — an automated Python version in the pipeline, and a fuller manual SQL suite — worth reconciling or at least confirming which is authoritative.
-- **Filename typo**: `model/03_dim_vechicle_type.sql` is misspelled ("vechicle") in the repo tree itself. Cosmetic, but any script or doc referencing the literal filename needs to match it exactly.
-- **Idempotency fix, already applied**: an earlier version of `09_pop_dims.sql` only had `ON CONFLICT (...) DO NOTHING` on the `dim_date` insert — the other five dimension inserts would abort with a duplicate-key error on a second run. `architecture.md` §6 states this is fixed; worth a quick check that the current file matches before relying on full-pipeline idempotency.
+- **Raw table naming.** `data_quality.md`'s test queries reference a table called `booking` (singular), while `incremental.md`, `model.md`, and `docker.md` all consistently use `bookings` (plural). Confirm the actual table name before running the SQL tests as written, or Tests 1 and 5 will fail with "relation does not exist."
+- **Quality-check count mismatch.** `docker.md` describes `scripts/data_quality_checks.py` (run inside the container) as performing 8 checks, while `data_quality.md` documents 10 SQL tests in `tests/data_quality_test.sql`. These read as two separate implementations — an automated Python version in the pipeline, and a fuller manual SQL suite — worth reconciling or at least confirming which is authoritative.
+- **Filename typo.** `model/03_dim_vechicle_type.sql` is misspelled ("vechicle") in the repo tree itself. Cosmetic, but any script or doc referencing the literal filename needs to match it exactly.
+- **Idempotency fix, already applied.** An earlier version of `09_pop_dims.sql` only had `ON CONFLICT (...) DO NOTHING` on the `dim_date` insert — the other five dimension inserts would abort with a duplicate-key error on a second run. `architecture.md` §6 states this is fixed; worth a quick check that the current file matches before relying on full-pipeline idempotency.
 
 ---
 
@@ -350,7 +369,7 @@ Flagging these rather than silently picking one, since the underlying docs disag
 - Docker Desktop (recommended path)
 - Optional, for the native Windows path: Python 3.13 and [`uv`](https://docs.astral.sh/uv/)
 
-### Docker path (recommended)
+### Docker Path (Recommended)
 
 1. Clone the repository:
    ```bash
@@ -398,7 +417,7 @@ Flagging these rather than silently picking one, since the underlying docs disag
    docker compose down -v
    ```
 
-### Native Windows path (no Docker)
+### Native Windows Path (No Docker)
 
 1. Clone the repo and install dependencies with `uv`:
    ```powershell
@@ -417,3 +436,54 @@ Flagging these rather than silently picking one, since the underlying docs disag
 4. Run the equivalent of the Docker entrypoint sequence via `ps1/pipeline.ps1`, or execute `model/01`–`10` and `scripts/data_quality_checks.py` manually against your local Postgres instance in that order.
 
 Either path produces the same result: a `bookings` raw table and a `fact_bookings` + `dim_*` star schema in Postgres, ready for the queries in `sql/01`–`10`.
+
+---
+
+## 9. Future Enhancements
+
+The current pipeline is deliberately scoped to batch CSV ingestion and manual scheduling. The items below are the natural next layers, grouped by the part of the stack they extend.
+
+### Modeling
+
+| Enhancement | Rationale |
+|---|---|
+| SCD Type 2 for `dim_vehicle_type`, `dim_payment_method`, `dim_location` | The current design (SCD 0/1) overwrites forward with no history. Type 2 would preserve prior associations if a dimension's meaning changes over time. |
+| Promote `customer_id` to a full `dim_customer` | Currently a degenerate dimension because no customer attributes exist yet. Worth splitting out once tier, signup date, or demographic data is available. |
+| Conformed date/time dimensions shared across future fact tables | Positions the warehouse for additional business processes (e.g., driver payouts, support tickets) without redefining `dim_date`/`dim_time` each time. |
+
+### Orchestration & Reliability
+
+| Enhancement | Rationale |
+|---|---|
+| Replace `Entrypoint.sh` with Airflow or Dagster DAGs | Gives dependency-aware scheduling, retries, alerting, and a visual run history instead of a single shell script that stops on first failure. |
+| GitHub Actions CI workflow | Run the 10 SQL quality tests and a schema-build smoke test automatically on every push or pull request, catching regressions before merge. |
+| Migrate `09_pop_dims.sql` / `10_pop_fact.sql` into dbt models | Would add automatic lineage graphs, built-in test macros (`unique`, `not_null`, `relationships`), and generated documentation — replacing hand-maintained SQL and docs with a single source of truth. |
+
+### Data Quality & Observability
+
+| Enhancement | Rationale |
+|---|---|
+| Reconcile the 8-check vs. 10-check discrepancy (Section 7) into one authoritative suite | Removes ambiguity about which implementation is canonical. |
+| Adopt Great Expectations or dbt tests for the quality layer | Adds automated pass/fail reporting, historical trend tracking, and alerting on top of the current manual SQL checks. |
+| Structured logging and metrics export from `etl_load_log` | Feed load metrics into a lightweight dashboard (rows loaded, skip rate, run duration) to spot ingestion drift early. |
+
+### Analytics & Consumption
+
+| Enhancement | Rationale |
+|---|---|
+| Power BI or Metabase dashboard on top of the star schema | Turns `sql/01`–`10` from static queries into a live, filterable reporting layer for non-technical stakeholders. |
+| Semantic layer via dbt metrics or a BI-tool semantic model | Codifies the additivity rules from Section 2.5 (e.g., "always AVG turnaround time") so downstream tools can't misuse the measures. |
+
+### Platform & Scale
+
+| Enhancement | Rationale |
+|---|---|
+| Kafka-based CDC ingestion alongside the batch CSV loader | Moves the pipeline toward near-real-time booking updates rather than periodic full-file drops. |
+| Cloud-native deployment (AWS RDS for Postgres, S3 for raw file archival, ECS/EKS for the pipeline container) | Removes the local-Docker constraint and enables scheduled, managed runs in production. |
+| Data catalog integration (e.g., OpenMetadata) | Auto-documents the warehouse schema and lineage, reducing reliance on manually maintained docs as the model grows. |
+
+---
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for details.
