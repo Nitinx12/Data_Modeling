@@ -2,11 +2,23 @@
 # =====================================================================
 # entrypoint.sh — container equivalent of ps1/pipeline.ps1
 #
-# Runs the same 4 steps, in the same order:
+# Runs 5 steps, in order:
+#   0. model/01_dim_date.sql .. model/08_fact_booking.sql  (schema DDL, via psql)
 #   1. scripts/incremental.py
 #   2. model/09_pop_dims.sql   (via psql)
 #   3. model/10_pop_fact.sql   (via psql)
 #   4. scripts/data_quality_checks.py
+#
+# STEP 0 is new: on a from-scratch Postgres instance (e.g. this container's
+# first run, or `docker compose down -v`), dim_*/fact_booking tables don't
+# exist yet, so 09_pop_dims.sql's INSERTs have nothing to insert into.
+# On a native/host setup this was presumably done once by hand — inside
+# Docker there's no "once by hand", so it needs to run as part of the
+# pipeline. This assumes 01-08 use `CREATE TABLE IF NOT EXISTS` (or
+# equivalent), making them safe to (re)run on every pipeline execution.
+# If any of them use a plain CREATE TABLE, this step will start failing
+# from the *second* run onward — switch those to IF NOT EXISTS, or ask
+# for help splitting this into a one-time-only init step instead.
 #
 # `set -euo pipefail` stops at the first failure, same guarantee as the
 # PowerShell version's $ErrorActionPreference + exit-code checks.
@@ -54,16 +66,31 @@ run_psql() {
     run_logged psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -f "$1"
 }
 
-log "STEP 1/4: Running incremental load (incremental.py)"
+# Your CSV's date strings are DD-MM-YYYY (e.g. "26-07-2024"). Postgres's
+# default datestyle (MDY, US-style) misreads that as month=26 and errors
+# with "date/time field value out of range". PGOPTIONS is a standard
+# libpq env var applied at connection startup — before any query runs —
+# so it's more reliable here than a `SET` issued via psql's -c flag.
+# It's also honored by psycopg2 (via libpq), so this fixes date parsing
+# for incremental.py and data_quality_checks.py too, not just psql.
+export PGOPTIONS="-c datestyle=ISO,DMY"
+
+log "STEP 0/5: Creating schema (dimension & fact tables, 01-08)"
+for schema_file in "$MODEL_DIR"/0[1-8]_*.sql; do
+    log "  -> $(basename "$schema_file")"
+    run_psql "$schema_file"
+done
+
+log "STEP 1/5: Running incremental load (incremental.py)"
 run_logged python "$SCRIPTS_DIR/incremental.py"
 
-log "STEP 2/4: Populating dimension tables (09_pop_dims.sql)"
+log "STEP 2/5: Populating dimension tables (09_pop_dims.sql)"
 run_psql "$MODEL_DIR/09_pop_dims.sql"
 
-log "STEP 3/4: Populating fact table (10_pop_fact.sql)"
+log "STEP 3/5: Populating fact table (10_pop_fact.sql)"
 run_psql "$MODEL_DIR/10_pop_fact.sql"
 
-log "STEP 4/4: Running data quality checks (data_quality_checks.py)"
+log "STEP 4/5: Running data quality checks (data_quality_checks.py)"
 run_logged python "$SCRIPTS_DIR/data_quality_checks.py"
 
 log "Pipeline completed successfully."
